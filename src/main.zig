@@ -19,10 +19,7 @@ pub fn main() !void {
     defer args.deinit();
     _ = args.skip();
 
-    const filename = args.next() orelse {
-        try stdout.writeAll("Must provide filename\r\n");
-        return;
-    };
+    const filename = args.next() orelse "src/main.zig";
 
     var file = try std.fs.cwd().openFile(filename, .{});
     defer file.close();
@@ -43,8 +40,10 @@ pub fn main() !void {
     };
     defer tree.destroy();
 
-    const node = tree.rootNode();
-    std.debug.print("{s}\n", .{node.kind()});
+    var tree_walker = TreeWalker.init(tree);
+    while (tree_walker.next()) |node| {
+        std.debug.print("{s} {s}\r\n", .{ contents[node.startByte()..node.endByte()], node.kind() });
+    }
 
     // const cursor = tree.walk();
     // defer cursor.destroy();
@@ -106,3 +105,47 @@ fn renderContents(stdout: std.fs.File, contents: []const u8) !void {
         end += 1;
     }
 }
+
+/// `TreeWalker` lets you walk the entirety of a TreeSitter tree
+/// node-by-node in prefix order.
+const TreeWalker = struct {
+    const Self = @This();
+
+    tree: *ts.Tree,
+    cursor: ?ts.TreeCursor,
+
+    pub fn init(tree: *ts.Tree) Self {
+        return Self{
+            .tree = tree,
+            .cursor = tree.walk(),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.cursor.destroy();
+    }
+
+    pub fn next(self: *Self) ?ts.Node {
+        var cursor = &(self.cursor orelse {
+            return null;
+        });
+
+        const node = cursor.node();
+        if (cursor.gotoFirstChild() or cursor.gotoNextSibling()) {
+            return node;
+        }
+
+        while (true) {
+            if (!cursor.gotoParent()) {
+                self.cursor = null;
+                break;
+            }
+
+            if (cursor.gotoNextSibling()) {
+                break;
+            }
+        }
+
+        return node;
+    }
+};
