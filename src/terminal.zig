@@ -41,3 +41,7 @@ export fn disableRawMode() void {
         @panic("Failed to disable raw mode; probably worth closing this terminal.");
     }
 }
+
+pub fn clearScreen(stdout: std.fs.File) !void {
+    try stdout.writeAll("\x1b[2J");
+}
