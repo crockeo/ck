@@ -40,6 +40,9 @@ pub fn main() !void {
     };
     defer tree.destroy();
 
+    var fontifyer = Fontifyer.init(allocator);
+    defer fontifyer.deinit();
+
     var tree_walker = TreeWalker.init(tree);
     while (tree_walker.next()) |node| {
         std.debug.print("{s} {s}\r\n", .{ contents[node.startByte()..node.endByte()], node.kind() });
@@ -70,7 +73,7 @@ pub fn main() !void {
     //     .read = null,
     // }, null);
 
-    // try renderContents(stdout, contents);
+    try renderContents(stdout, &fontifyer, contents);
 }
 
 // NOTE: Keeping this around, even though we're not using it,
@@ -102,7 +105,8 @@ pub fn main() !void {
 //     }
 // };
 
-fn renderContents(stdout: std.fs.File, contents: []const u8) !void {
+fn renderContents(stdout: std.fs.File, fontifyer: *const Fontifyer, contents: []const u8) !void {
+    _ = fontifyer;
     const size = try terminal.getSize(stdout);
 
     var start: usize = 0;
@@ -163,4 +167,29 @@ const TreeWalker = struct {
 
         return node;
     }
+};
+
+const Fontifyer = struct {
+    const Self = @This();
+
+    font_regions: std.ArrayList(FontRegion),
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return Self{
+            .font_regions = std.ArrayList(FontRegion).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.font_regions.deinit();
+    }
+
+    pub fn render(_: *const Self, _: usize, _: []const u8) void {
+        @panic("TODO");
+    }
+};
+
+const FontRegion = struct {
+    start: usize,
+    end: usize,
 };
