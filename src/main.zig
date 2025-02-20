@@ -45,6 +45,21 @@ pub fn main() !void {
         std.debug.print("{s} {s}\r\n", .{ contents[node.startByte()..node.endByte()], node.kind() });
     }
 
+    // NOTE to self, next steps:
+    // - take the tree walker to build up "font regions"
+    //   - these should just be segments of byte ranges and associated styles
+    //   - for now: this is just going to be colors
+    // - provide these font ranges into `renderContents`
+    // - each time we print a line in `renderContents`,
+    //   actually call a `renderLine` function,
+    //   which also takes the font regions
+    //   - write out segments of the line until you get to a font boundary
+    //   - print the special characters the font region tells you to print
+    //     - either the thing to enter the region if it's an enter
+    //     - or the thing to return to the original value if it's an exit
+    //     - this should _probably_ be a stack, but not super relevant for now
+    //   - and then continue on!
+
     // const cursor = tree.walk();
     // defer cursor.destroy();
 
