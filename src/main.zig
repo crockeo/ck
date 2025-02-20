@@ -1,6 +1,10 @@
 const std = @import("std");
 
+const ts = @import("tree-sitter");
+
 const terminal = @import("terminal.zig");
+
+extern fn tree_sitter_zig() callconv(.C) *ts.Language;
 
 pub fn main() !void {
     const stdin = std.io.getStdIn();
@@ -26,8 +30,56 @@ pub fn main() !void {
     const contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(contents);
 
+    const language = tree_sitter_zig();
+    defer language.destroy();
+
+    const parser = ts.Parser.create();
+    defer parser.destroy();
+    try parser.setLanguage(language);
+
+    const tree = parser.parseString(contents, null) orelse {
+        try stdout.writeAll("Failed to parse tree\r\n");
+        return;
+    };
+
+    std.debug.print("{}\n", .{tree});
+
+    // parser.parse(.{
+    //     .payload = @ptrCast(contents),
+    //     .read = null,
+    // }, null);
+
     try renderContents(stdout, contents);
 }
+
+// NOTE: Keeping this around, even though we're not using it,
+// because it will be useful when we have to fontify a file.
+//
+// const Contents = struct {
+//     const Self = @This();
+
+//     contents: []const u8,
+//     read_buf: [1024]u8,
+
+//     fn init(contents: []const u8) Self {
+//         return Self{
+//             .contents = contents,
+//             .read_buf = undefined,
+//         };
+//     }
+
+//     export fn readContent(payload: ?*anyopaque, byte_index: u32, position: tree_sitter.Point, bytes_read: *u32) [*c]const u8 {
+//         const verifiedPayload = payload orelse {
+//             @panic("Contents.readContent called w/o valid payload.");
+//         };
+//         var self: *Self = @ptrCast(verifiedPayload);
+//         return self.readContentInner(byte_index, position, bytes_read);
+//     }
+
+//     fn readContentInner(self: *Self, byte_index: u32, position: tree_sitter.Point, bytes_read: *u32) [*c]const u8 {
+//         @panic("TODO!");
+//     }
+// };
 
 fn renderContents(stdout: std.fs.File, contents: []const u8) !void {
     const size = try terminal.getSize(stdout);

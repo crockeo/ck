@@ -1,0 +1,3 @@
+[submodule "tree-sitter-zig"]
+	path = tree-sitter-zig
+	url = https://github.com/tree-sitter-grammars/tree-sitter-zig
