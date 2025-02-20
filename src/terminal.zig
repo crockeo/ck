@@ -1,5 +1,6 @@
 const std = @import("std");
 const c = @cImport({
+    @cInclude("sys/ioctl.h");
     @cInclude("stdlib.h");
     @cInclude("termios.h");
 });
@@ -44,4 +45,20 @@ export fn disableRawMode() void {
 
 pub fn clearScreen(stdout: std.fs.File) !void {
     try stdout.writeAll("\x1b[2J");
+}
+
+pub const Size = struct {
+    rows: usize,
+    cols: usize,
+};
+
+pub fn getSize(stdout: std.fs.File) !Size {
+    var winsize: c.struct_winsize = undefined;
+    if (c.ioctl(stdout.handle, c.TIOCGWINSZ, &winsize) != 0) {
+        @panic("TODO: turn this into a normal error");
+    }
+    return Size{
+        .rows = winsize.ws_row,
+        .cols = winsize.ws_col,
+    };
 }

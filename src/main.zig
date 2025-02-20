@@ -30,11 +30,16 @@ pub fn main() !void {
 }
 
 fn renderContents(stdout: std.fs.File, contents: []const u8) !void {
+    const size = try terminal.getSize(stdout);
+
     var start: usize = 0;
     var end: usize = 0;
     while (end < contents.len) {
         if (contents[end] == '\n') {
-            try stdout.writeAll(contents[start..end]);
+            const width = end - start;
+            const truncatedEnd = start + @min(size.cols + 1, width);
+
+            try stdout.writeAll(contents[start..truncatedEnd]);
             try stdout.writeAll("\r\n");
             end += 1;
             start = end;
