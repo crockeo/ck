@@ -37,19 +37,26 @@ pub fn main() !void {
     defer parser.destroy();
     try parser.setLanguage(language);
 
-    const tree = parser.parseString(contents, null) orelse {
+    const tree: *ts.Tree = parser.parseString(contents, null) orelse {
         try stdout.writeAll("Failed to parse tree\r\n");
         return;
     };
+    defer tree.destroy();
 
-    std.debug.print("{}\n", .{tree});
+    const node = tree.rootNode();
+    std.debug.print("{s}\n", .{node.kind()});
+
+    // const cursor = tree.walk();
+    // defer cursor.destroy();
+
+    // std.debug.print("{}\n", .{tree});
 
     // parser.parse(.{
     //     .payload = @ptrCast(contents),
     //     .read = null,
     // }, null);
 
-    try renderContents(stdout, contents);
+    // try renderContents(stdout, contents);
 }
 
 // NOTE: Keeping this around, even though we're not using it,
