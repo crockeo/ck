@@ -46,13 +46,119 @@ pub fn main() !void {
     var tree_walker = TreeWalker.init(tree);
     while (tree_walker.next()) |node| {
         const kind = node.kind();
-        if (std.mem.eql(u8, kind, "break")) {
-            std.debug.print("{} {}\r\n", .{ node.startByte(), node.endByte() });
+        // std.debug.print("{s} -- {s}\r\n", .{ kind, contents[node.startByte()..node.endByte()] });
+
+        // if (std.mem.eql(u8, kind, "(")) {
+        //     try fontifyer.addRegion(.{
+        //         .start = node.startByte(),
+        //         .end = node.endByte(),
+        //         .bytes = "\x1b[31m", // red
+        //     });
+        // }
+        //
+        // (
+        const symbols = [_][]const u8{
+            "(",
+            ")",
+            ",",
+            ".",
+            "..",
+            "?",
+            "[",
+            "]",
+            "{",
+            "}",
+        };
+        for (symbols) |symbol| {
+            if (std.mem.eql(u8, kind, symbol)) {
+                try fontifyer.addRegion(.{
+                    .start = node.startByte(),
+                    .end = node.endByte(),
+                    .bytes = "\x1b[2m", // dim
+                });
+                break;
+            }
+        }
+
+        const keywords = [_][]const u8{
+            "*",
+            "*=",
+            "+",
+            "+=",
+            "-",
+            "-=",
+            "/",
+            "/=",
+            "<",
+            "<=",
+            "=",
+            "==",
+            ">",
+            ">=",
+            "and",
+            "if",
+            "continue",
+            "while",
+            "for",
+            "break",
+            "builtin_type",
+            "const",
+            "fn",
+            "null",
+            "return",
+            "or",
+            "orelse",
+            "pub",
+            "unreachable",
+            "var",
+            "return",
+            "try",
+        };
+        for (keywords) |keyword| {
+            if (std.mem.eql(u8, kind, keyword)) {
+                try fontifyer.addRegion(.{
+                    .start = node.startByte(),
+                    .end = node.endByte(),
+                    .bytes = "\x1b[31m", // red
+                });
+                break;
+            }
+        }
+
+        if (std.mem.eql(u8, kind, "string")) {
             try fontifyer.addRegion(.{
                 .start = node.startByte(),
                 .end = node.endByte(),
-                .bytes = "\x1b[31m", // red
+                .bytes = "\x1b[33m", // yellow
             });
+            continue;
+        }
+
+        if (std.mem.eql(u8, kind, "builtin_identifier")) {
+            try fontifyer.addRegion(.{
+                .start = node.startByte(),
+                .end = node.endByte(),
+                .bytes = "\x1b[34m", // blue
+            });
+            continue;
+        }
+
+        if (std.mem.eql(u8, kind, "integer")) {
+            try fontifyer.addRegion(.{
+                .start = node.startByte(),
+                .end = node.endByte(),
+                .bytes = "\x1b[35m", // magenta
+            });
+            continue;
+        }
+
+        if (std.mem.eql(u8, kind, "comment")) {
+            try fontifyer.addRegion(.{
+                .start = node.startByte(),
+                .end = node.endByte(),
+                .bytes = "\x1b[90m", // bright black
+            });
+            continue;
         }
     }
 
@@ -206,67 +312,54 @@ const Fontifyer = struct {
         @panic("TODO: implement non-sorted insertion");
     }
 
-    pub fn render(self: *const Self, stdout: std.fs.File, offset: usize, content: []const u8) !void {
-        // _ = stdout;
-        // TODO: could do a log_2(N) lookup here,
-        // since we know that this is sorted
+    pub fn render(self: *const Self, stdout: std.fs.File, offset: usize, contents: []const u8) !void {
+        var first_relevant_region: ?usize = null;
+        var last_relevant_region: ?usize = null;
+
         var font_region_index: usize = 0;
-        while (font_region_index < self.font_regions.items.len and self.font_regions.items[font_region_index].end < offset) {
-            font_region_index += 1;
-        }
+        while (font_region_index < self.font_regions.items.len) {
+            const font_region = self.font_regions.items[font_region_index];
 
-        if (font_region_index == self.font_regions.items.len) {
-            try stdout.writeAll(content);
-            return;
-        }
-
-        var last_font_region: ?*const FontRegion = null;
-        var font_region: *const FontRegion = &self.font_regions.items[font_region_index];
-
-        if (font_region.end < offset) {
-            try stdout.writeAll(content);
-            return;
-        }
-
-        while (font_region.start > offset and font_region.end <= offset + content.len) {
-            if (last_font_region == null) {
-                try stdout.writeAll(content[0..(font_region.start - offset)]);
+            const is_before_content = font_region.end < offset;
+            if (is_before_content) {
+                font_region_index += 1;
+                continue;
             }
 
-            try stdout.writeAll(font_region.bytes);
-            try stdout.writeAll(content[(font_region.start - offset)..(font_region.end - offset)]);
-            try stdout.writeAll("\x1b[0m");
-
-            font_region_index += 1;
-            if (font_region_index == self.font_regions.items.len) {
+            const is_after_content = font_region.start >= offset + contents.len;
+            if (is_after_content) {
                 break;
             }
-            last_font_region = font_region;
-            font_region = &self.font_regions.items[font_region_index];
+
+            if (first_relevant_region == null) {
+                first_relevant_region = font_region_index;
+            }
+            last_relevant_region = font_region_index;
+            font_region_index += 1;
         }
 
-        if (font_region.end < offset) {
-            // try stdout.writeAll(content);
+        if (first_relevant_region == null or last_relevant_region == null) {
+            // If there are not relevant font regions for this line,
+            // just print it out and don't think too hard about it.
+            try stdout.writeAll(contents);
             return;
         }
 
-        // while (true) {
-        //     if (font_region_index >= self.font_regions.items.len) {
-        //         break;
-        //     }
+        // TODO: fix this for font regions which exceed the end of contents.
 
-        //     const font_region = &self.font_regions.items[font_region_index];
-        //     if (font_region.start > offset + content.len
-        // }
-        // while (font_region_index < self.font_regions.items.len and self.font_regions.items[font_region_index].start < offset + content.len) {
-        //     const font_region = &self.font_regions.items[font_region_index];
-        //     font_region_index += 1;
+        const start = first_relevant_region orelse unreachable;
+        const end = last_relevant_region orelse unreachable;
+        var checkpoint: usize = 0;
+        for (self.font_regions.items[start .. end + 1]) |font_region| {
+            try stdout.writeAll(contents[checkpoint .. font_region.start - offset]);
+            try stdout.writeAll(font_region.bytes);
 
-        // }
-
-        // If the line is starting in the middle of a
-
-        // @panic("TODO");
+            const segment_end = @min(contents.len, font_region.end - offset);
+            try stdout.writeAll(contents[font_region.start - offset .. segment_end]);
+            try stdout.writeAll("\x1b[0m");
+            checkpoint = segment_end;
+        }
+        try stdout.writeAll(contents[checkpoint..contents.len]);
     }
 };
 
