@@ -45,7 +45,15 @@ pub fn main() !void {
 
     var tree_walker = TreeWalker.init(tree);
     while (tree_walker.next()) |node| {
-        std.debug.print("{s} {s}\r\n", .{ contents[node.startByte()..node.endByte()], node.kind() });
+        const kind = node.kind();
+        if (std.mem.eql(u8, kind, "break")) {
+            std.debug.print("{} {}\r\n", .{ node.startByte(), node.endByte() });
+            try fontifyer.addRegion(.{
+                .start = node.startByte(),
+                .end = node.endByte(),
+                .bytes = "\x1b[31m", // red
+            });
+        }
     }
 
     // NOTE to self, next steps:
@@ -106,7 +114,6 @@ pub fn main() !void {
 // };
 
 fn renderContents(stdout: std.fs.File, fontifyer: *const Fontifyer, contents: []const u8) !void {
-    _ = fontifyer;
     const size = try terminal.getSize(stdout);
 
     var start: usize = 0;
@@ -114,9 +121,9 @@ fn renderContents(stdout: std.fs.File, fontifyer: *const Fontifyer, contents: []
     while (end < contents.len) {
         if (contents[end] == '\n') {
             const width = end - start;
-            const truncatedEnd = start + @min(size.cols + 1, width);
+            const truncatedEnd = start + @min(size.cols, width);
 
-            try stdout.writeAll(contents[start..truncatedEnd]);
+            try fontifyer.render(stdout, start, contents[start..truncatedEnd]);
             try stdout.writeAll("\r\n");
             end += 1;
             start = end;
@@ -157,7 +164,7 @@ const TreeWalker = struct {
         while (true) {
             if (!cursor.gotoParent()) {
                 self.cursor = null;
-                break;
+                break; // something else
             }
 
             if (cursor.gotoNextSibling()) {
@@ -184,12 +191,87 @@ const Fontifyer = struct {
         self.font_regions.deinit();
     }
 
-    pub fn render(_: *const Self, _: usize, _: []const u8) void {
-        @panic("TODO");
+    pub fn addRegion(self: *Self, region: FontRegion) !void {
+        if (self.font_regions.items.len == 0) {
+            try self.font_regions.append(region);
+            return;
+        }
+
+        const last_font_region = &self.font_regions.items[self.font_regions.items.len - 1];
+        if (last_font_region.end <= region.start) {
+            try self.font_regions.append(region);
+            return;
+        }
+
+        @panic("TODO: implement non-sorted insertion");
+    }
+
+    pub fn render(self: *const Self, stdout: std.fs.File, offset: usize, content: []const u8) !void {
+        // _ = stdout;
+        // TODO: could do a log_2(N) lookup here,
+        // since we know that this is sorted
+        var font_region_index: usize = 0;
+        while (font_region_index < self.font_regions.items.len and self.font_regions.items[font_region_index].end < offset) {
+            font_region_index += 1;
+        }
+
+        if (font_region_index == self.font_regions.items.len) {
+            try stdout.writeAll(content);
+            return;
+        }
+
+        var last_font_region: ?*const FontRegion = null;
+        var font_region: *const FontRegion = &self.font_regions.items[font_region_index];
+
+        if (font_region.end < offset) {
+            try stdout.writeAll(content);
+            return;
+        }
+
+        while (font_region.start > offset and font_region.end <= offset + content.len) {
+            if (last_font_region == null) {
+                try stdout.writeAll(content[0..(font_region.start - offset)]);
+            }
+
+            try stdout.writeAll(font_region.bytes);
+            try stdout.writeAll(content[(font_region.start - offset)..(font_region.end - offset)]);
+            try stdout.writeAll("\x1b[0m");
+
+            font_region_index += 1;
+            if (font_region_index == self.font_regions.items.len) {
+                break;
+            }
+            last_font_region = font_region;
+            font_region = &self.font_regions.items[font_region_index];
+        }
+
+        if (font_region.end < offset) {
+            // try stdout.writeAll(content);
+            return;
+        }
+
+        // while (true) {
+        //     if (font_region_index >= self.font_regions.items.len) {
+        //         break;
+        //     }
+
+        //     const font_region = &self.font_regions.items[font_region_index];
+        //     if (font_region.start > offset + content.len
+        // }
+        // while (font_region_index < self.font_regions.items.len and self.font_regions.items[font_region_index].start < offset + content.len) {
+        //     const font_region = &self.font_regions.items[font_region_index];
+        //     font_region_index += 1;
+
+        // }
+
+        // If the line is starting in the middle of a
+
+        // @panic("TODO");
     }
 };
 
 const FontRegion = struct {
     start: usize,
     end: usize,
+    bytes: []const u8,
 };
