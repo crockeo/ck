@@ -48,15 +48,11 @@ pub fn main() !void {
         const kind = node.kind();
         // std.debug.print("{s} -- {s}\r\n", .{ kind, contents[node.startByte()..node.endByte()] });
 
-        // if (std.mem.eql(u8, kind, "(")) {
-        //     try fontifyer.addRegion(.{
-        //         .start = node.startByte(),
-        //         .end = node.endByte(),
-        //         .bytes = "\x1b[31m", // red
-        //     });
-        // }
-        //
-        // (
+        // TODO: figure out how to do coloring for things which are not _just_ their own object
+        // thinking like:
+        // - identifiers which start with a capital letter
+        // - identifiers which are function invocations
+
         const symbols = [_][]const u8{
             "(",
             ")",
