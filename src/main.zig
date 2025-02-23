@@ -6,6 +6,11 @@ const terminal = @import("terminal.zig");
 
 extern fn tree_sitter_zig() callconv(.C) *ts.Language;
 
+const UP_ARROW = [_]u8{ 27, 91, 65 };
+const DOWN_ARROW = [_]u8{ 27, 91, 66 };
+const RIGHT_ARROW = [_]u8{ 27, 91, 67 };
+const LEFT_ARROW = [_]u8{ 27, 91, 68 };
+
 pub fn main() !void {
     const stdin = std.io.getStdIn();
     const stdout = std.io.getStdOut();
@@ -158,39 +163,42 @@ pub fn main() !void {
         }
     }
 
-    // NOTE to self, next steps:
-    // - take the tree walker to build up "font regions"
-    //   - these should just be segments of byte ranges and associated styles
-    //   - for now: this is just going to be colors
-    // - provide these font ranges into `renderContents`
-    // - each time we print a line in `renderContents`,
-    //   actually call a `renderLine` function,
-    //   which also takes the font regions
-    //   - write out segments of the line until you get to a font boundary
-    //   - print the special characters the font region tells you to print
-    //     - either the thing to enter the region if it's an enter
-    //     - or the thing to return to the original value if it's an exit
-    //     - this should _probably_ be a stack, but not super relevant for now
-    //   - and then continue on!
-
-    // const cursor = tree.walk();
-    // defer cursor.destroy();
-
-    // std.debug.print("{}\n", .{tree});
-
-    // parser.parse(.{
-    //     .payload = @ptrCast(contents),
-    //     .read = null,
-    // }, null);
-
-    var buf: [1]u8 = undefined;
+    var vertical_offset: usize = 0;
+    var horizontal_offset: usize = 0;
+    var buf: [8]u8 = undefined;
     while (true) {
         try stdout.writeAll("\x1b[H");
-        try renderContents(stdout, &fontifyer, contents);
+        try renderContents(
+            stdout,
+            &fontifyer,
+            contents,
+            vertical_offset,
+            horizontal_offset,
+        );
 
-        _ = try stdin.read(&buf);
-        if (buf[0] == 'q') {
+        const size = try stdin.read(&buf);
+        if (size == 0) {
+            continue;
+        }
+
+        const buf_segment = buf[0..size];
+        if (std.mem.eql(u8, buf_segment, &[_]u8{'q'})) {
             break;
+        }
+
+        if (std.mem.eql(u8, buf_segment, &UP_ARROW) and vertical_offset > 0) {
+            vertical_offset -= 1;
+        }
+        if (std.mem.eql(u8, buf_segment, &DOWN_ARROW)) {
+            // TODO: don't go past the end of the content
+            vertical_offset += 1;
+        }
+        if (std.mem.eql(u8, buf_segment, &LEFT_ARROW) and vertical_offset > 0) {
+            horizontal_offset -= 1;
+        }
+        if (std.mem.eql(u8, buf_segment, &RIGHT_ARROW)) {
+            // TODO: don't go past the end of the content
+            horizontal_offset += 1;
         }
     }
 }
@@ -224,20 +232,36 @@ pub fn main() !void {
 //     }
 // };
 
-fn renderContents(stdout: std.fs.File, fontifyer: *const Fontifyer, contents: []const u8) !void {
+fn renderContents(
+    stdout: std.fs.File,
+    fontifyer: *const Fontifyer,
+    contents: []const u8,
+    vertical_offset: usize,
+    horizontal_offset: usize,
+) !void {
+    // TODO: do horizontal scrolling
+    _ = horizontal_offset;
+
     const size = try terminal.getSize(stdout);
 
     var start: usize = 0;
     var end: usize = 0;
     var line: usize = 0;
-    while (end < contents.len and line < size.rows) {
+    while (end < contents.len and line < size.rows + vertical_offset) {
+        if (contents[end] == '\n' and line < vertical_offset) {
+            end += 1;
+            start = end;
+            line += 1;
+            continue;
+        }
+
         if (contents[end] == '\n') {
             const width = end - start;
             const truncatedEnd = start + @min(size.cols, width);
 
             try fontifyer.render(stdout, start, contents[start..truncatedEnd]);
             try stdout.writeAll("\x1b[0J"); // erase the rest of the line
-            if (line != size.rows - 1) {
+            if (line != size.rows + vertical_offset - 1) {
                 try stdout.writeAll("\r\n");
             }
             end += 1;
