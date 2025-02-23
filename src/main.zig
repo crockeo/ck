@@ -183,7 +183,16 @@ pub fn main() !void {
     //     .read = null,
     // }, null);
 
-    try renderContents(stdout, &fontifyer, contents);
+    var buf: [1]u8 = undefined;
+    while (true) {
+        try stdout.writeAll("\x1b[H");
+        try renderContents(stdout, &fontifyer, contents);
+
+        _ = try stdin.read(&buf);
+        if (buf[0] == 'q') {
+            break;
+        }
+    }
 }
 
 // NOTE: Keeping this around, even though we're not using it,
@@ -220,15 +229,21 @@ fn renderContents(stdout: std.fs.File, fontifyer: *const Fontifyer, contents: []
 
     var start: usize = 0;
     var end: usize = 0;
-    while (end < contents.len) {
+    var line: usize = 0;
+    while (end < contents.len and line < size.rows) {
         if (contents[end] == '\n') {
             const width = end - start;
             const truncatedEnd = start + @min(size.cols, width);
 
             try fontifyer.render(stdout, start, contents[start..truncatedEnd]);
-            try stdout.writeAll("\r\n");
+            try stdout.writeAll("\x1b[0J"); // erase the rest of the line
+            if (line != size.rows - 1) {
+                try stdout.writeAll("\r\n");
+            }
             end += 1;
             start = end;
+            line += 1;
+            continue;
         }
         end += 1;
     }
