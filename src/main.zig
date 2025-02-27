@@ -55,12 +55,46 @@ pub fn main() !void {
     var tree_walker = TreeWalker.init(tree);
     while (tree_walker.next()) |node| {
         const kind = node.kind();
-        // std.debug.print("{s} -- {s}\r\n", .{ kind, contents[node.startByte()..node.endByte()] });
+        std.debug.print("{s} -- {s}\r\n", .{ kind, contents[node.startByte()..node.endByte()] });
 
-        // TODO: figure out how to do coloring for things which are not _just_ their own object
-        // thinking like:
-        // - identifiers which start with a capital letter
-        // - identifiers which are function invocations
+        if (std.mem.eql(u8, kind, "identifier")) {
+            const is_attribute_call = blk: {
+                const dot_node = node.prevSibling() orelse break :blk false;
+                const parent_node = node.parent() orelse break :blk false;
+                const paren_node = parent_node.nextSibling() orelse break :blk false;
+                break :blk (std.mem.eql(u8, dot_node.kind(), ".") and std.mem.eql(u8, paren_node.kind(), "("));
+            };
+
+            const start_byte = node.startByte();
+            const end_byte = node.endByte();
+            const identifier = contents[start_byte..end_byte];
+
+            var all_upper_case_letter: bool = true;
+            var has_upper_case_letter: bool = false;
+            for (identifier) |char| {
+                if (char >= 'A' and char <= 'Z') {
+                    has_upper_case_letter = true;
+                } else if (char != '_') {
+                    // '_' is used in constants,
+                    // which is what this check is for.
+                    all_upper_case_letter = false;
+                }
+            }
+
+            if (all_upper_case_letter) {
+                try fontifyer.addRegion(.{
+                    .start = start_byte,
+                    .end = end_byte,
+                    .bytes = "\x1b[38;5;214m", // orange
+                });
+            } else if (is_attribute_call or has_upper_case_letter) {
+                try fontifyer.addRegion(.{
+                    .start = start_byte,
+                    .end = end_byte,
+                    .bytes = "\x1b[32m", // green
+                });
+            }
+        }
 
         const symbols = [_][]const u8{
             "(",
@@ -265,11 +299,13 @@ const TreeWalker = struct {
 
     tree: *ts.Tree,
     cursor: ?ts.TreeCursor,
+    depth: usize,
 
     pub fn init(tree: *ts.Tree) Self {
         return Self{
             .tree = tree,
             .cursor = tree.walk(),
+            .depth = 0,
         };
     }
 
@@ -282,8 +318,12 @@ const TreeWalker = struct {
             return null;
         });
 
+        std.debug.print("{} ", .{self.depth});
         const node = cursor.node();
-        if (cursor.gotoFirstChild() or cursor.gotoNextSibling()) {
+        if (cursor.gotoFirstChild()) {
+            self.depth += 1;
+            return node;
+        } else if (cursor.gotoNextSibling()) {
             return node;
         }
 
@@ -291,6 +331,8 @@ const TreeWalker = struct {
             if (!cursor.gotoParent()) {
                 self.cursor = null;
                 break; // something else
+            } else {
+                self.depth -= 1;
             }
 
             if (cursor.gotoNextSibling()) {
