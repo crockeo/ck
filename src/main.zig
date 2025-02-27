@@ -173,13 +173,19 @@ pub fn main() !void {
             continue;
         }
 
-        if (std.mem.eql(u8, kind, "builtin_identifier")) {
-            try fontifyer.addRegion(.{
-                .start = node.startByte(),
-                .end = node.endByte(),
-                .bytes = "\x1b[34m", // blue
-            });
-            continue;
+        const builtin_identifiers = [_][]const u8{
+            "builtin_identifier",
+            "defer",
+        };
+        for (builtin_identifiers) |builtin_identifier| {
+            if (std.mem.eql(u8, kind, builtin_identifier)) {
+                try fontifyer.addRegion(.{
+                    .start = node.startByte(),
+                    .end = node.endByte(),
+                    .bytes = "\x1b[34m", // blue
+                });
+                break;
+            }
         }
 
         if (std.mem.eql(u8, kind, "integer")) {
