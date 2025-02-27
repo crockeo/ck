@@ -29,6 +29,10 @@ pub fn main() !void {
     var file = try std.fs.cwd().openFile(filename, .{});
     defer file.close();
 
+    // TODO: decide a good datastructure for text editing
+    // - just a sequence of bytes?
+    // - lines?
+    // - a rope? what is a rope???
     const contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(contents);
 
@@ -163,18 +167,22 @@ pub fn main() !void {
         }
     }
 
+    var buffered_writer = std.io.BufferedWriter(8192, std.fs.File.Writer){ .unbuffered_writer = stdout.writer() };
+
     var vertical_offset: usize = 0;
     var horizontal_offset: usize = 0;
     var buf: [8]u8 = undefined;
     while (true) {
-        try stdout.writeAll("\x1b[H");
+        try writeAll(&buffered_writer, "\x1b[H");
         try renderContents(
             stdout,
+            buffered_writer.writer(),
             &fontifyer,
             contents,
             vertical_offset,
             horizontal_offset,
         );
+        try buffered_writer.flush();
 
         const size = try stdin.read(&buf);
         if (size == 0) {
@@ -190,58 +198,32 @@ pub fn main() !void {
             vertical_offset -= 1;
         }
         if (std.mem.eql(u8, buf_segment, &DOWN_ARROW)) {
-            // TODO: don't go past the end of the content
-            vertical_offset += 1;
+            const length = findLength(contents);
+            const terminalSize = try terminal.getSize(stdout);
+            if (vertical_offset < length - terminalSize.rows) {
+                vertical_offset += 1;
+            }
         }
-        if (std.mem.eql(u8, buf_segment, &LEFT_ARROW) and vertical_offset > 0) {
+        if (std.mem.eql(u8, buf_segment, &LEFT_ARROW) and horizontal_offset > 0) {
             horizontal_offset -= 1;
         }
         if (std.mem.eql(u8, buf_segment, &RIGHT_ARROW)) {
-            // TODO: don't go past the end of the content
-            horizontal_offset += 1;
+            const width = findWidth(contents);
+            if (horizontal_offset < width) {
+                horizontal_offset += 1;
+            }
         }
     }
 }
 
-// NOTE: Keeping this around, even though we're not using it,
-// because it will be useful when we have to fontify a file.
-//
-// const Contents = struct {
-//     const Self = @This();
-
-//     contents: []const u8,
-//     read_buf: [1024]u8,
-
-//     fn init(contents: []const u8) Self {
-//         return Self{
-//             .contents = contents,
-//             .read_buf = undefined,
-//         };
-//     }
-
-//     export fn readContent(payload: ?*anyopaque, byte_index: u32, position: tree_sitter.Point, bytes_read: *u32) [*c]const u8 {
-//         const verifiedPayload = payload orelse {
-//             @panic("Contents.readContent called w/o valid payload.");
-//         };
-//         var self: *Self = @ptrCast(verifiedPayload);
-//         return self.readContentInner(byte_index, position, bytes_read);
-//     }
-
-//     fn readContentInner(self: *Self, byte_index: u32, position: tree_sitter.Point, bytes_read: *u32) [*c]const u8 {
-//         @panic("TODO!");
-//     }
-// };
-
 fn renderContents(
     stdout: std.fs.File,
+    writer: anytype,
     fontifyer: *const Fontifyer,
     contents: []const u8,
     vertical_offset: usize,
     horizontal_offset: usize,
 ) !void {
-    // TODO: do horizontal scrolling
-    _ = horizontal_offset;
-
     const size = try terminal.getSize(stdout);
 
     var start: usize = 0;
@@ -256,13 +238,16 @@ fn renderContents(
         }
 
         if (contents[end] == '\n') {
-            const width = end - start;
-            const truncatedEnd = start + @min(size.cols, width);
+            const effective_start = if (start + horizontal_offset <= end) start + horizontal_offset else end;
 
-            try fontifyer.render(stdout, start, contents[start..truncatedEnd]);
-            try stdout.writeAll("\x1b[0J"); // erase the rest of the line
+            if (effective_start < end) {
+                const truncated_end = @min(end, effective_start + size.cols);
+                try fontifyer.render(writer, start, contents[effective_start..truncated_end], horizontal_offset);
+            }
+            try writeAll(writer, "\x1b[0J"); // erase the rest of the line
+
             if (line != size.rows + vertical_offset - 1) {
-                try stdout.writeAll("\r\n");
+                try writeAll(writer, "\r\n");
             }
             end += 1;
             start = end;
@@ -347,21 +332,25 @@ const Fontifyer = struct {
         @panic("TODO: implement non-sorted insertion");
     }
 
-    pub fn render(self: *const Self, stdout: std.fs.File, offset: usize, contents: []const u8) !void {
+    pub fn render(self: *const Self, writer: anytype, absolute_start: usize, contents: []const u8, horizontal_offset: usize) !void {
+        if (contents.len == 0) return;
+
         var first_relevant_region: ?usize = null;
         var last_relevant_region: ?usize = null;
+        const content_start = absolute_start + horizontal_offset;
+        const content_end = content_start + contents.len;
 
         var font_region_index: usize = 0;
         while (font_region_index < self.font_regions.items.len) {
             const font_region = self.font_regions.items[font_region_index];
 
-            const is_before_content = font_region.end < offset;
+            const is_before_content = font_region.end <= content_start;
             if (is_before_content) {
                 font_region_index += 1;
                 continue;
             }
 
-            const is_after_content = font_region.start >= offset + contents.len;
+            const is_after_content = font_region.start >= content_end;
             if (is_after_content) {
                 break;
             }
@@ -374,27 +363,42 @@ const Fontifyer = struct {
         }
 
         if (first_relevant_region == null or last_relevant_region == null) {
-            // If there are not relevant font regions for this line,
+            // If there are no relevant font regions for this line,
             // just print it out and don't think too hard about it.
-            try stdout.writeAll(contents);
+            try writeAll(writer, contents);
             return;
         }
 
-        // TODO: fix this for font regions which exceed the end of contents.
-
         const start = first_relevant_region orelse unreachable;
-        const end = last_relevant_region orelse unreachable;
+        const end = (last_relevant_region orelse unreachable) + 1;
         var checkpoint: usize = 0;
-        for (self.font_regions.items[start .. end + 1]) |font_region| {
-            try stdout.writeAll(contents[checkpoint .. font_region.start - offset]);
-            try stdout.writeAll(font_region.bytes);
 
-            const segment_end = @min(contents.len, font_region.end - offset);
-            try stdout.writeAll(contents[font_region.start - offset .. segment_end]);
-            try stdout.writeAll("\x1b[0m");
-            checkpoint = segment_end;
+        for (self.font_regions.items[start..end]) |font_region| {
+            const fr_start = if (font_region.start > content_start)
+                font_region.start - content_start
+            else
+                0;
+
+            const fr_end = if (font_region.end < content_end)
+                font_region.end - content_start
+            else
+                contents.len;
+
+            if (fr_start > checkpoint) {
+                try writeAll(writer, contents[checkpoint..fr_start]);
+            }
+
+            try writeAll(writer, font_region.bytes);
+            try writeAll(writer, contents[fr_start..fr_end]);
+            try writeAll(writer, "\x1b[0m");
+
+            checkpoint = fr_end;
         }
-        try stdout.writeAll(contents[checkpoint..contents.len]);
+
+        // Write any remaining content after the last font region
+        if (checkpoint < contents.len) {
+            try writeAll(writer, contents[checkpoint..]);
+        }
     }
 };
 
@@ -403,3 +407,42 @@ const FontRegion = struct {
     end: usize,
     bytes: []const u8,
 };
+
+fn writeAll(writer: anytype, buf: []const u8) !void {
+    var start: usize = 0;
+    while (start < buf.len) {
+        start += try writer.write(buf[start..buf.len]);
+    }
+}
+
+fn findLength(contents: []const u8) usize {
+    var length: usize = 0;
+    for (contents) |char| {
+        if (char == '\n') {
+            length += 1;
+        }
+    }
+    return length;
+}
+
+fn findWidth(contents: []const u8) usize {
+    var width: usize = 0;
+    var max_width: usize = 0;
+    for (contents) |char| {
+        if (char == '\n') {
+            if (width > max_width) {
+                max_width = width;
+            }
+            width = 0;
+        } else {
+            width += 1;
+        }
+    }
+
+    // If the file doesn't end with a `\n`,
+    // this lets us count the last line.
+    if (width > max_width) {
+        return width;
+    }
+    return max_width;
+}
