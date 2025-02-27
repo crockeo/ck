@@ -55,7 +55,7 @@ pub fn main() !void {
     var tree_walker = TreeWalker.init(tree);
     while (tree_walker.next()) |node| {
         const kind = node.kind();
-        std.debug.print("{s} -- {s}\r\n", .{ kind, contents[node.startByte()..node.endByte()] });
+        // std.debug.print("{s} -- {s}\r\n", .{ kind, contents[node.startByte()..node.endByte()] });
 
         if (std.mem.eql(u8, kind, "identifier")) {
             const is_attribute_call = blk: {
@@ -318,7 +318,6 @@ const TreeWalker = struct {
             return null;
         });
 
-        std.debug.print("{} ", .{self.depth});
         const node = cursor.node();
         if (cursor.gotoFirstChild()) {
             self.depth += 1;
