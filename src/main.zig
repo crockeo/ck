@@ -2,6 +2,7 @@ const std = @import("std");
 
 const ts = @import("tree-sitter");
 
+const Rope = @import("rope.zig").Rope;
 const terminal = @import("terminal.zig");
 
 extern fn tree_sitter_zig() callconv(.C) *ts.Language;
@@ -35,6 +36,9 @@ pub fn main() !void {
     // - a rope? what is a rope???
     const contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(contents);
+
+    const rope = try Rope.init(allocator);
+    defer rope.deinit();
 
     const language = tree_sitter_zig();
     defer language.destroy();
