@@ -4,41 +4,34 @@ pub const Rope = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    lhs: ?*Rope,
-    rhs: ?*Rope,
-    element: RopeElement,
+    root: *RopeNode,
 
     pub fn init(allocator: std.mem.Allocator) !Self {
         return .{
             .allocator = allocator,
-            .lhs = null,
-            .rhs = null,
-            .element = .{ .lhs_size = 0 },
+            .root = try RopeNode.initNode(allocator, null, null),
         };
     }
 
     pub fn deinit(self: *const Self) void {
-        if (self.lhs) |lhs| {
-            lhs.deinit();
-            self.allocator.destroy(lhs);
-        }
-        if (self.rhs) |rhs| {
-            rhs.deinit();
-            self.allocator.destroy(rhs);
-        }
+        self.root.deinit();
+        self.allocator.destroy(self.root);
     }
 
     pub fn len(self: *const Self) usize {
-        var length: usize = 0;
-        switch (self.element) {
-            .lhs_size => |lhs_size| length += lhs_size,
-            // TODO: this isn't quite right. we don't always take all 32 bytes.
-            .contents => |contents| length += contents.len,
+        return self.root.len();
+    }
+
+    pub fn printAll(self: *const Self, writer: std.io.AnyWriter) !void {
+        if (self.lhs) |lhs| {
+            try lhs.printAll(writer);
+        }
+        if (self.element.contents) |contents| {
+            try writer.writeAll(contents[0..contents.len]);
         }
         if (self.rhs) |rhs| {
-            length += rhs.len();
+            try rhs.printAll(writer);
         }
-        return length;
     }
 
     pub fn insert(self: *Self, index: usize, _: []const u8) !void {
@@ -54,9 +47,84 @@ pub const Rope = struct {
     }
 };
 
+const RopeNode = struct {
+    allocator: std.mem.Allocator,
+    lhs: ?*RopeNode,
+    rhs: ?*RopeNode,
+    element: RopeElement,
+
+    fn initNode(allocator: std.mem.Allocator, lhs: ?*RopeNode, rhs: ?*RopeNode) !*RopeNode {
+        var lhs_size: usize = 0;
+        if (lhs) |bound_lhs| {
+            lhs_size = bound_lhs.len();
+        }
+        const rope_node = try allocator.create(RopeNode);
+        rope_node.* = .{
+            .allocator = allocator,
+            .lhs = lhs,
+            .rhs = rhs,
+            .element = .{ .lhs_size = lhs_size },
+        };
+        return rope_node;
+    }
+
+    fn initLeaf(allocator: std.mem.Allocator, contents: []const u8) !*RopeNode {
+        var element_contents = RopeElementContents{
+            .buf = undefined,
+            .len = contents.len,
+        };
+        std.mem.copyForwards(u8, &element_contents.buf, contents);
+
+        const rope_node = try allocator.create(RopeNode);
+        rope_node.* = .{
+            .allocator = allocator,
+            .lhs = null,
+            .rhs = null,
+            .element = .{ .contents = element_contents },
+        };
+        return rope_node;
+    }
+
+    fn deinit(self: *const RopeNode) void {
+        if (self.lhs) |lhs| {
+            lhs.deinit();
+            self.allocator.destroy(lhs);
+        }
+        if (self.rhs) |rhs| {
+            rhs.deinit();
+            self.allocator.destroy(rhs);
+        }
+    }
+
+    fn len(self: *const RopeNode) usize {
+        switch (self.element) {
+            .lhs_size => |lhs_size| {
+                const rhs_size = blk: {
+                    if (self.rhs) |rhs| {
+                        break :blk rhs.len();
+                    } else {
+                        break :blk 0;
+                    }
+                };
+                return lhs_size + rhs_size;
+            },
+            .contents => |contents| {
+                // If we have string contents this must be a leaf node,
+                // so just return the length here.
+                return contents.len;
+            },
+        }
+    }
+};
+
 const RopeElement = union(enum) {
     lhs_size: usize,
-    contents: [32]u8,
+    contents: RopeElementContents,
+};
+
+const RopeElementContents = struct {
+    buf: [32]u8,
+    len: usize,
 };
 
 test "create rope" {
