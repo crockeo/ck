@@ -59,8 +59,8 @@ pub const Rope = struct {
         var rhs: ?*RopeNode = null;
         try split(self.allocator, self.root.?, index, &lhs, &rhs);
 
-        const tmp = try concat(self.allocator, lhs.?, new_node);
-        self.root = try concat(self.allocator, tmp, rhs.?);
+        const tmp = try concat(self.allocator, lhs, new_node);
+        self.root = try concat(self.allocator, tmp, rhs);
     }
 
     pub fn append(self: *Self, str: []const u8) !void {
@@ -105,6 +105,7 @@ pub const Rope = struct {
     }
 
     pub fn writeAll(self: *const Self, writer: anytype) !void {
+        @breakpoint();
         if (self.root) |root| {
             try root.writeAll(writer);
         }
@@ -168,7 +169,7 @@ const RopeNode = struct {
     }
 
     fn initTree(allocator: std.mem.Allocator, contents: []const u8) !*RopeNode {
-        if (contents.len <= 32) {
+        if (contents.len <= 64) {
             return try initLeaf(allocator, contents);
         }
         const mid = contents.len / 2;

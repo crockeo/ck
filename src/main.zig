@@ -34,11 +34,20 @@ pub fn main() !void {
     // - just a sequence of bytes?
     // - lines?
     // - a rope? what is a rope???
-    const contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-    defer allocator.free(contents);
+    var rope = blk: {
+        const contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+        defer allocator.free(contents);
 
-    const rope = try Rope.init(allocator);
-    defer rope.deinit();
+        var rope = Rope.init(allocator);
+        errdefer rope.deinit();
+        try rope.append(contents);
+        break :blk rope;
+    };
+    rope.deinit();
+
+    // TODO: migrate references to this to instead read subsections from the rope directly
+    const contents = try rope.toString(allocator);
+    defer allocator.free(contents);
 
     const language = tree_sitter_zig();
     defer language.destroy();
