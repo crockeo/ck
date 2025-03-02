@@ -2,7 +2,7 @@ const std = @import("std");
 
 const ts = @import("tree-sitter");
 
-const Rope = @import("rope.zig").Rope;
+const file_buffer = @import("file_buffer.zig");
 const terminal = @import("terminal.zig");
 
 extern fn tree_sitter_zig() callconv(.C) *ts.Language;
@@ -27,26 +27,22 @@ pub fn main() !void {
 
     const filename = args.next() orelse "src/main.zig";
 
-    var file = try std.fs.cwd().openFile(filename, .{});
-    defer file.close();
+    var file_handle = try std.fs.cwd().openFile(filename, .{});
+    defer file_handle.close();
 
     // TODO: decide a good datastructure for text editing
     // - just a sequence of bytes?
     // - lines?
     // - a rope? what is a rope???
-    var rope = blk: {
-        const contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    var file = blk: {
+        const contents = try file_handle.readToEndAlloc(allocator, std.math.maxInt(usize));
         defer allocator.free(contents);
-
-        var rope = Rope.init(allocator);
-        errdefer rope.deinit();
-        try rope.append(contents);
-        break :blk rope;
+        break :blk try file_buffer.FileBuffer.init(allocator, contents);
     };
-    defer rope.deinit();
+    defer file.deinit();
 
-    // TODO: migrate references to this to instead read subsections from the rope directly
-    const contents = try rope.toString(allocator);
+    // TODO: migrate references to this to instead read subsections from the file directly
+    const contents = try file.toString(allocator);
     defer allocator.free(contents);
 
     const language = tree_sitter_zig();
@@ -251,9 +247,8 @@ pub fn main() !void {
             vertical_offset -= 1;
         }
         if (std.mem.eql(u8, buf_segment, &DOWN_ARROW)) {
-            const length = findLength(contents);
             const terminalSize = try terminal.getSize(stdout);
-            if (vertical_offset < length - terminalSize.rows) {
+            if (vertical_offset < file.lineCount() - terminalSize.rows) {
                 vertical_offset += 1;
             }
         }
