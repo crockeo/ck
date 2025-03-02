@@ -43,7 +43,7 @@ pub fn main() !void {
         try rope.append(contents);
         break :blk rope;
     };
-    rope.deinit();
+    defer rope.deinit();
 
     // TODO: migrate references to this to instead read subsections from the rope directly
     const contents = try rope.toString(allocator);

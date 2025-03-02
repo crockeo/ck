@@ -105,7 +105,6 @@ pub const Rope = struct {
     }
 
     pub fn writeAll(self: *const Self, writer: anytype) !void {
-        @breakpoint();
         if (self.root) |root| {
             try root.writeAll(writer);
         }
