@@ -227,7 +227,7 @@ pub fn main() !void {
             stdout,
             buffered_writer.writer(),
             &fontifyer,
-            contents,
+            &file,
             vertical_offset,
             horizontal_offset,
         );
@@ -268,41 +268,39 @@ fn renderContents(
     stdout: std.fs.File,
     writer: anytype,
     fontifyer: *const Fontifyer,
-    contents: []const u8,
+    file: *const file_buffer.FileBuffer,
     vertical_offset: usize,
     horizontal_offset: usize,
 ) !void {
     const size = try terminal.getSize(stdout);
 
-    var start: usize = 0;
-    var end: usize = 0;
+    // TODO: can we optimize this out by keeping track of it somewhere?
+    var byte_offset: usize = 0;
+    var file_line_iter = file.iterLines(0, vertical_offset);
+    while (file_line_iter.next()) |line_content| {
+        // Add `1` to the end, for the extra '\n' byte.
+        byte_offset += line_content.len + 1;
+    }
+
     var line: usize = 0;
-    while (end < contents.len and line < size.rows + vertical_offset) {
-        if (contents[end] == '\n' and line < vertical_offset) {
-            end += 1;
-            start = end;
-            line += 1;
-            continue;
+    while (line < size.rows) {
+        const line_content = file.lines.items[line + vertical_offset].items;
+        const sliced_line_content = blk: {
+            const start = @min(line_content.len, horizontal_offset);
+            const end = @min(line_content.len, size.cols + horizontal_offset);
+            break :blk line_content[start..end];
+        };
+        try fontifyer.render(
+            writer,
+            byte_offset + horizontal_offset,
+            sliced_line_content,
+        );
+        try writeAll(writer, "\x1b[0J"); // erase the rest of the line
+        if (line != size.rows - 1) {
+            try writeAll(writer, "\r\n");
         }
-
-        if (contents[end] == '\n') {
-            const effective_start = if (start + horizontal_offset <= end) start + horizontal_offset else end;
-
-            if (effective_start < end) {
-                const truncated_end = @min(end, effective_start + size.cols);
-                try fontifyer.render(writer, start, contents[effective_start..truncated_end], horizontal_offset);
-            }
-            try writeAll(writer, "\x1b[0J"); // erase the rest of the line
-
-            if (line != size.rows + vertical_offset - 1) {
-                try writeAll(writer, "\r\n");
-            }
-            end += 1;
-            start = end;
-            line += 1;
-            continue;
-        }
-        end += 1;
+        byte_offset += line_content.len + 1;
+        line += 1;
     }
 }
 
@@ -387,12 +385,12 @@ const Fontifyer = struct {
         @panic("TODO: implement non-sorted insertion");
     }
 
-    pub fn render(self: *const Self, writer: anytype, absolute_start: usize, contents: []const u8, horizontal_offset: usize) !void {
+    pub fn render(self: *const Self, writer: anytype, absolute_start: usize, contents: []const u8) !void {
         if (contents.len == 0) return;
 
         var first_relevant_region: ?usize = null;
         var last_relevant_region: ?usize = null;
-        const content_start = absolute_start + horizontal_offset;
+        const content_start = absolute_start;
         const content_end = content_start + contents.len;
 
         var font_region_index: usize = 0;

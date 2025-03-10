@@ -3,6 +3,9 @@ const std = @import("std");
 const Line = std.ArrayList(u8);
 const Lines = std.ArrayList(Line);
 
+// TODO: support fast access to a line by byte offset.
+// try not to make it so you have to do an O(n) operation
+// every time that you modify the file...
 pub const FileBuffer = struct {
     const Self = @This();
 
